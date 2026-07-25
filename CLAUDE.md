@@ -75,4 +75,28 @@ Anomalie-Check → Toast/E-Mail, headless, Duplikatsschutz.
   tab-getrennt (`platzbelegung.parse_csv`).
 - Täglicher Task Scheduler-Eintrag `DFBnet Spielplus taeglich` (17:00 Uhr) ist eingerichtet.
 
-Plan mit vollem Kontext: `C:\Users\Uli\.claude\plans\compiled-wandering-quill.md`
+## Wichtige Entscheidungen & Begründungen
+- **Playwright statt HTTP-Requests**: DFBnet Spielplus nutzt OAuth-Login (`auth.dfbnet.org`,
+  Keycloak) + Angular-Frontend; ein reiner Request-Login ist damit nicht robust nachbaubar.
+- **SQLite lokal statt Cloud-DB**: Anforderung war explizit eine private, lokale Speicherung
+  ohne externe Abhängigkeit — passt zum Ein-Personen/Ein-Rechner-Anwendungsfall.
+- **Platzbelegung + Spielstätte aus dem CSV-Export, nicht aus einem eigenen Seitenaufruf**:
+  der Export der Ergebnismeldungen-Seite enthält beides je Spiel bereits vollständig, spart
+  einen zusätzlichen, fehleranfälligen Navigationsschritt.
+- **Historisierung nur für `datum`, `uhrzeit`, `spielstaette`, `status`**: das sind genau die
+  Felder, die sich laut Nutzer im Saisonverlauf ändern und praktisch relevant sind (nicht z. B.
+  Wettbewerb/Staffel, die sich effektiv nie ändern).
+- **Anomalie-Benachrichtigung nur bei technisch unbekannten Werten, nicht bei bekannten fachlichen
+  Ereignissen (Absetzung, Verlegung)**: verhindert Benachrichtigungs-Müdigkeit; bekannte Ereignisse
+  landen zuverlässig in der Historie und können bei Bedarf dort nachgeschaut werden. Eine spätere
+  Erweiterung um Benachrichtigungen für bestimmte fachliche Ereignisse ist bewusst vertagt, kein
+  vergessener Punkt.
+- **E-Mail statt zweitem geplanten Cloud-Claude-Code-Task für Anomalie-Meldungen**: ursprünglich
+  geplant, aber technisch nicht möglich, da Cloud-Routinen keinen Zugriff auf die lokale
+  SQLite-Datei haben. E-Mail (Google Workspace SMTP, App-Passwort) enthält zusätzlich einen fertig
+  formulierten, 1:1 kopierbaren Prompt für eine neue Claude-Code-Sitzung samt Dateihinweisen je
+  Anomalie-Typ, damit eine Fehlerbehebung ohne erneute Kontext-Aufnahme starten kann.
+- **Backfill-Skript (`src/backfill.py`) als eigenständiges Werkzeug**: diente zum Testen der
+  gesamten Pipeline gegen 2 Jahre echter Daten und deckte dabei 3 reale Scraper-Bugs auf
+  (Navigation per fixer Koordinate statt Selektor, doppelte HTML-`id` bei Sonderwertung,
+  `text_content()` auf einem Dropdown-Feld) — bleibt als Werkzeug für spätere Nachträge/Tests.
