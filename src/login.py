@@ -41,7 +41,7 @@ def login(page: Page) -> None:
     # Die Portalseite laedt fortlaufend Werbebanner nach, daher wird hier nicht auf
     # "networkidle" gewartet (das koennte nie eintreten), sondern nur auf die Rueckkehr
     # zu www.dfbnet.org sowie den anschliessenden DOM-Ladezustand.
-    page.wait_for_url("**://www.dfbnet.org/**", timeout=LOGIN_TIMEOUT_MS)
+    page.wait_for_url("**://www.dfbnet.org/**", timeout=LOGIN_TIMEOUT_MS, wait_until="domcontentloaded")
     page.wait_for_load_state("domcontentloaded", timeout=LOGIN_TIMEOUT_MS)
 
 

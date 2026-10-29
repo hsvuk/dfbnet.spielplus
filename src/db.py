@@ -5,7 +5,8 @@ from config import DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS spiele (
-    spiel_nr TEXT PRIMARY KEY,
+    spiel_nr TEXT NOT NULL,
+    saison TEXT NOT NULL,
     datum TEXT NOT NULL,
     uhrzeit TEXT,
     heimmannschaft TEXT,
@@ -17,7 +18,8 @@ CREATE TABLE IF NOT EXISTS spiele (
     spielstaette_nr TEXT,
     sonderereignis TEXT,
     status TEXT,
-    aktualisiert_am TEXT NOT NULL DEFAULT (datetime('now'))
+    aktualisiert_am TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (spiel_nr, saison)
 );
 
 CREATE TABLE IF NOT EXISTS platzbelegung (
@@ -27,12 +29,14 @@ CREATE TABLE IF NOT EXISTS platzbelegung (
     uhrzeit_von TEXT,
     uhrzeit_bis TEXT,
     belegt_durch TEXT,
+    spielstatus TEXT,
     aktualisiert_am TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS spiel_historie (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     spiel_nr TEXT NOT NULL,
+    saison TEXT NOT NULL,
     feld TEXT NOT NULL,
     alter_wert TEXT,
     neuer_wert TEXT,
@@ -48,6 +52,14 @@ CREATE TABLE IF NOT EXISTS anomalien (
     gemeldet INTEGER NOT NULL DEFAULT 0
 );
 """
+
+def saison_von_datum(datum: str) -> str:
+    """Spielzeit (Juli bis Juni) zu einem Datum dd.mm.yyyy, z. B. "2024/25".
+    Spielnummern werden von DFBnet ueber Saisons hinweg wiederverwendet."""
+    tag, monat, jahr = datum.split(".")
+    start = int(jahr) if int(monat) >= 7 else int(jahr) - 1
+    return f"{start}/{str(start + 1)[2:]}"
+
 
 # Felder, deren Aenderung in spiel_historie protokolliert wird.
 HISTORISIERTE_FELDER = ["datum", "uhrzeit", "spielstaette", "status"]
@@ -76,18 +88,19 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
         for column in ("spielstaette", "spielstaette_nr", "sonderereignis", "status"):
             _add_column_if_missing(conn, "spiele", column, "TEXT")
+        _add_column_if_missing(conn, "platzbelegung", "spielstatus", "TEXT")
 
 
 def upsert_spiel(conn: sqlite3.Connection, spiel: dict) -> None:
     conn.execute(
         """
-        INSERT INTO spiele (spiel_nr, datum, uhrzeit, heimmannschaft, gastmannschaft,
+        INSERT INTO spiele (spiel_nr, saison, datum, uhrzeit, heimmannschaft, gastmannschaft,
                              ergebnis, wettbewerb, staffel, spielstaette, spielstaette_nr,
                              sonderereignis, status, aktualisiert_am)
-        VALUES (:spiel_nr, :datum, :uhrzeit, :heimmannschaft, :gastmannschaft,
+        VALUES (:spiel_nr, :saison, :datum, :uhrzeit, :heimmannschaft, :gastmannschaft,
                 :ergebnis, :wettbewerb, :staffel, :spielstaette, :spielstaette_nr,
                 :sonderereignis, :status, datetime('now'))
-        ON CONFLICT(spiel_nr) DO UPDATE SET
+        ON CONFLICT(spiel_nr, saison) DO UPDATE SET
             datum=excluded.datum,
             uhrzeit=excluded.uhrzeit,
             heimmannschaft=excluded.heimmannschaft,
@@ -105,13 +118,15 @@ def upsert_spiel(conn: sqlite3.Connection, spiel: dict) -> None:
     )
 
 
-def record_historie(conn: sqlite3.Connection, spiel_nr: str, feld: str, alter_wert, neuer_wert) -> None:
+def record_historie(
+    conn: sqlite3.Connection, spiel_nr: str, saison: str, feld: str, alter_wert, neuer_wert
+) -> None:
     conn.execute(
         """
-        INSERT INTO spiel_historie (spiel_nr, feld, alter_wert, neuer_wert, erkannt_am)
-        VALUES (?, ?, ?, ?, datetime('now'))
+        INSERT INTO spiel_historie (spiel_nr, saison, feld, alter_wert, neuer_wert, erkannt_am)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
         """,
-        (spiel_nr, feld, alter_wert, neuer_wert),
+        (spiel_nr, saison, feld, alter_wert, neuer_wert),
     )
 
 
@@ -119,7 +134,8 @@ def diff_and_upsert_spiel(conn: sqlite3.Connection, spiel: dict) -> None:
     """Vergleicht ueberwachte Felder mit dem bestehenden Stand, protokolliert Aenderungen
     in spiel_historie und upserted anschliessend den neuen Stand."""
     bestehend = conn.execute(
-        "SELECT * FROM spiele WHERE spiel_nr = ?", (spiel["spiel_nr"],)
+        "SELECT * FROM spiele WHERE spiel_nr = ? AND saison = ?",
+        (spiel["spiel_nr"], spiel["saison"]),
     ).fetchone()
 
     if bestehend is not None:
@@ -129,7 +145,7 @@ def diff_and_upsert_spiel(conn: sqlite3.Connection, spiel: dict) -> None:
             alt = alter_stand.get(feld)
             neu = spiel.get(feld)
             if alt != neu and (alt or neu):
-                record_historie(conn, spiel["spiel_nr"], feld, alt, neu)
+                record_historie(conn, spiel["spiel_nr"], spiel["saison"], feld, alt, neu)
 
     upsert_spiel(conn, spiel)
 
@@ -138,14 +154,15 @@ def upsert_platzbelegung(conn: sqlite3.Connection, eintrag: dict) -> None:
     conn.execute(
         """
         INSERT INTO platzbelegung (id, sportstaette_nr, datum, uhrzeit_von, uhrzeit_bis,
-                                    belegt_durch, aktualisiert_am)
+                                    belegt_durch, spielstatus, aktualisiert_am)
         VALUES (:id, :sportstaette_nr, :datum, :uhrzeit_von, :uhrzeit_bis,
-                :belegt_durch, datetime('now'))
+                :belegt_durch, :spielstatus, datetime('now'))
         ON CONFLICT(id) DO UPDATE SET
             datum=excluded.datum,
             uhrzeit_von=excluded.uhrzeit_von,
             uhrzeit_bis=excluded.uhrzeit_bis,
             belegt_durch=excluded.belegt_durch,
+            spielstatus=excluded.spielstatus,
             aktualisiert_am=datetime('now')
         """,
         eintrag,

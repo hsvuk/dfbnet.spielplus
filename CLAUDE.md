@@ -20,8 +20,12 @@ inkl. Änderungshistorie pro Spiel und Anomalie-Erkennung mit Benachrichtigung.
 - `src/ergebnisse.py` — Ergebnismeldungen-Abfrage/Scraping, `BEKANNTE_STATUS`-Whitelist,
   `unbekannte_stati()` für Anomalie-Erkennung
 - `src/platzbelegung.py` — CSV-Export parsen, Platzbelegung für konfigurierte Sportstätte filtern
-- `src/db.py` — SQLite-Schema, Upsert-Funktionen, `diff_and_upsert_spiel()` (schreibt
-  `spiel_historie` bei Änderungen an datum/uhrzeit/spielstaette/status), `anomalien`-Tabelle
+- `src/db.py` — SQLite-Schema (Spiele-Schlüssel: `spiel_nr` + `saison`), Upsert-Funktionen,
+  `diff_and_upsert_spiel()` (schreibt `spiel_historie` bei Änderungen an
+  datum/uhrzeit/spielstaette/status), `saison_von_datum()`, `anomalien`-Tabelle
+- `src/verarbeitung.py` — gemeinsame Speicherlogik für `run.py` und `backfill.py`
+  (`speichere()`): wählt je Spielnummer+Saison die aktuelle Zeile, ordnet Spielstätten zu,
+  schreibt Spiele/Historie/Platzbelegung (siehe „Spielnummern & Verlegungen“)
 - `src/notify.py` — Desktop-Toast (`benachrichtige_anomalien`) + E-Mail
   (`sende_email_anomalien`) bei neuen Anomalien, inkl. fertigem Copy-Paste-Prompt für Claude Code
 - `src/run.py` — Orchestriert den kompletten Lauf, mit granularem Error-Handling und Logging
@@ -50,9 +54,9 @@ inkl. Änderungshistorie pro Spiel und Anomalie-Erkennung mit Benachrichtigung.
   Stattdessen E-Mail-Versand über Google Workspace SMTP (app@hoeinger-sv.de, App-Passwort).
 
 ## Stand
-Voll funktionsfähig, End-to-End getestet inkl. Backfill von 2 Jahren echter Historendaten
-(01.07.2024–heute, 331 Spiele, 125 Platzbelegungen, 327 Historie-Einträge, 0 offene Anomalien
-nach Fixes). Login → Suche → Scraping → CSV-Export → Diff/Historie → DB-Upsert →
+Voll funktionsfähig, End-to-End getestet inkl. Backfill von 2 Jahren echter Daten
+(01.07.2024–heute, nach Neuaufbau 29.10.2026: 391 Spiele, 150 Platzbelegungen, 0 Anomalien;
+Historie beginnt faktisch erst mit dem laufenden Betrieb). Login → Suche → Scraping → CSV-Export → Diff/Historie → DB-Upsert →
 Anomalie-Check → Toast/E-Mail, headless, Duplikatsschutz.
 
 - `Ergebnismeldung`: erreichbar über Hamburger-Menü, Button `#dfb-Menu-toggle` (NICHT per fester
@@ -74,6 +78,35 @@ Anomalie-Check → Toast/E-Mail, headless, Duplikatsschutz.
   derselben Seite), nicht aus einem separaten "Spielstätten"-Menü. CSV ist UTF-16-kodiert,
   tab-getrennt (`platzbelegung.parse_csv`).
 - Täglicher Task Scheduler-Eintrag `DFBnet Spielplus taeglich` (17:00 Uhr) ist eingerichtet.
+
+## Spielnummern & Verlegungen (seit 29.10.2026)
+Erkenntnisse aus echten Portaldaten — NICHT wieder „vereinfachen“:
+- **Spielnummern werden über Saisons hinweg wiederverwendet** (z. B. 210181098: 03.11.2024 gegen
+  TuS Bremen und 25.10.2026 gegen SG Oberense = zwei verschiedene Spiele). Identität eines Spiels
+  ist deshalb (`spiel_nr`, `saison`); Saison = Spielzeit Juli–Juni (`db.saison_von_datum`, z. B.
+  „2024/25“). Das Datum gehört NICHT in den Schlüssel, sonst wäre jede Verlegung ein neues Spiel.
+- **Bei einer Verlegung bleibt der alte Termin als eigene Zeile bestehen** (gleiche Spielnummer,
+  Status beginnt mit „Verlegt-Spiel“, ggf. Sonderereignis „Ausfall“/„Annullierung“), der neue
+  Termin kommt als weitere Zeile dazu. Mehrfach-Verlegungen ergeben mehrere alte Zeilen. Der alte
+  Termin kann zeitlich vor ODER nach dem neuen liegen. Da die Abfrage nur 3 Monate sieht, sind
+  oft nur eine oder beide Zeilen sichtbar.
+- Regel (`verarbeitung.waehle_aktuelle_spiele`): aktuell ist die Zeile ohne „Verlegt-Spiel“.
+  Sind nur verlegte Zeilen sichtbar, gilt (a) die mit dem spätesten Datum, wenn die DB das Spiel
+  noch nicht aktiv kennt, sonst (b) nur eine Zeile mit dem Datum des DB-Stands; alle anderen sind
+  „überholt“, schreiben die DB nicht fort und landen einmalig als Historie-Feld `verlegt_von`
+  (sofern nicht schon als Datumsänderung erfasst). Ohne diese Regel entstanden bei jedem Lauf
+  Hin-und-her-Einträge (2/3 der Historie war Rauschen).
+- CSV-Export: Spielstätte je (Spielkennung, Spieldatum) zuordnen; bei verlegten Zeilen steht dort
+  „verlegt auf …“ statt eines Ortes → wird zu `""`.
+- Platzbelegung: `id` = `<Spielkennung>/<Saison>`, Spalte `spielstatus`; abgesetzte/ausgefallene
+  Spiele bleiben mit Status erhalten, überholte Verlegt-Zeilen entfallen, Belegungen im gelesenen
+  Fenster, die der Export nicht mehr enthält, werden gelöscht.
+- Die DB wurde am 29.10.2026 mit dem neuen Schema neu aufgebaut (Backfill ab 01.07.2024). Alter
+  Stand (mit fehlerhafter Historie) als Archiv: `data/spielplus_alt_2026-10-29.sqlite3` sowie
+  `data/spielplus.sqlite3.bak_2026-10-29`. Historie-Einträge aus dem Backfill (außer
+  `verlegt_von`) wurden entfernt, da Backfill keine echte Beobachtung ist.
+- Hinweis: Wenn `data/spielplus.sqlite3` von einem anderen Programm geöffnet ist (DB-Viewer),
+  lässt sie sich unter Windows nicht löschen/umbenennen („Device or resource busy“).
 
 ## Robustheit im Dauerbetrieb (seit 29.10.2026)
 Im Betrieb traten sporadisch Timeouts auf (15.10., 23.10., 28.10.2026 — jeweils an anderer Stelle:

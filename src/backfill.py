@@ -14,12 +14,12 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from db import connect, diff_and_upsert_spiel, init_db, record_anomalie, upsert_platzbelegung
+from db import connect, init_db, record_anomalie
 from ergebnisse import export_csv, goto_and_search, scrape_ergebnisse, unbekannte_stati
 from login import login
 from notify import benachrichtige_anomalien, sende_email_anomalien
-from platzbelegung import filter_platzbelegung, parse_csv
-from run import _spielstaetten_lookup
+from platzbelegung import parse_csv
+from verarbeitung import speichere
 
 FENSTER_TAGE = 90
 
@@ -56,39 +56,15 @@ def run_backfill(start: date, ende: date, headless: bool = False) -> None:
                     export_csv(page, csv_path)
                     csv_rows = parse_csv(csv_path)
 
-                lookup = _spielstaetten_lookup(csv_rows)
-                for spiel in spiele:
-                    spielstaette, spielstaette_nr = lookup.get(spiel["spiel_nr"], ("", ""))
-                    spiel["spielstaette"] = spielstaette
-                    spiel["spielstaette_nr"] = spielstaette_nr
-
-                belegungen = filter_platzbelegung(csv_rows)
                 anomalien = unbekannte_stati(spiele)
-
                 with connect() as conn:
-                    for spiel in spiele:
-                        try:
-                            diff_and_upsert_spiel(conn, spiel)
-                        except Exception as exc:
-                            detail = (
-                                f"{exc}\n\nTraceback:\n{traceback.format_exc()}\n\n"
-                                f"Spieldaten: {spiel!r}"
-                            )
-                            anomalien.append(
-                                {
-                                    "typ": "scraping_fehler",
-                                    "kontext": spiel.get("spiel_nr"),
-                                    "detail": detail,
-                                    "schritt": "DB-Speicherung (diff_and_upsert_spiel) in src/db.py",
-                                }
-                            )
-                    for eintrag in belegungen:
-                        upsert_platzbelegung(conn, eintrag)
+                    aktuelle_spiele, belegungen, fehler = speichere(conn, spiele, csv_rows, von, bis)
+                    anomalien.extend(fehler)
                     for anomalie in anomalien:
                         record_anomalie(conn, anomalie["typ"], anomalie["kontext"], anomalie["detail"])
 
-                print(f"  {len(spiele)} Spiele, {len(belegungen)} Belegungen, {len(anomalien)} Anomalien")
-                gesamt_spiele += len(spiele)
+                print(f"  {len(aktuelle_spiele)} Spiele, {len(belegungen)} Belegungen, {len(anomalien)} Anomalien")
+                gesamt_spiele += len(aktuelle_spiele)
                 gesamt_belegungen += len(belegungen)
                 alle_anomalien.extend(anomalien)
 
