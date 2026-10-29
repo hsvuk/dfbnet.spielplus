@@ -19,6 +19,7 @@ from ergebnisse import (
 from login import login
 from notify import benachrichtige_anomalien, sende_email_anomalien
 from platzbelegung import parse_csv
+from snapshot import schreibe_snapshot
 from verarbeitung import speichere
 
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -122,6 +123,7 @@ def main(headless: bool = True) -> int:
     anomalien = unbekannte_stati(spiele)
     with connect() as conn:
         aktuelle_spiele, belegungen, fehler = speichere(conn, spiele, csv_rows, von, bis)
+        schreibe_snapshot(conn)
         anomalien.extend(fehler)
         for anomalie in anomalien:
             log.warning("Anomalie: %s", anomalie["detail"])
