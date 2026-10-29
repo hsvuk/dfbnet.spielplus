@@ -16,13 +16,25 @@ def benachrichtige_anomalien(anomalien: list[dict]) -> None:
         return
 
     anzahl = len(anomalien)
-    beispiel = anomalien[0]["detail"]
+    beispiel = anomalien[0]["detail"].splitlines()[0]
     toast = Notification(
         app_id="DFBnet Spielplus",
-        title=f"{anzahl} unbekannte(r) Wert(e) beim DFBnet-Abgleich",
+        title=_titel(anomalien),
         msg=f"{beispiel}" + (" ..." if anzahl > 1 else ""),
     )
     toast.show()
+
+
+def _titel(anomalien: list[dict]) -> str:
+    """Kurzer Titel, der technische Fehler von unbekannten Werten unterscheidet."""
+    fehler = sum(1 for a in anomalien if a["typ"] == "scraping_fehler")
+    unbekannt = len(anomalien) - fehler
+    teile = []
+    if fehler:
+        teile.append(f"{fehler} technische(r) Fehler")
+    if unbekannt:
+        teile.append(f"{unbekannt} unbekannte(r) Wert(e)")
+    return "DFBnet Spielplus: " + " und ".join(teile)
 
 
 def _formatiere_email_text(anomalien: list[dict]) -> str:
@@ -30,11 +42,21 @@ def _formatiere_email_text(anomalien: list[dict]) -> str:
         f"- [{a['typ']}] Spiel {a.get('kontext') or '-'}: {a['detail'].splitlines()[0]}"
         for a in anomalien
     ]
-    zusammenfassung = (
-        f"Beim DFBnet-Spielplus-Abgleich wurden {len(anomalien)} unbekannte "
-        "Wert(e) gefunden, auf die das Programm noch nicht vorbereitet ist.\n\n"
-        + "\n".join(zeilen)
-    )
+    fehler = [a for a in anomalien if a["typ"] == "scraping_fehler"]
+    unbekannt = [a for a in anomalien if a["typ"] != "scraping_fehler"]
+    absaetze = []
+    if fehler:
+        absaetze.append(
+            f"{len(fehler)} technische(r) Fehler beim DFBnet-Spielplus-Abgleich (auch nach "
+            "automatischen Wiederholungsversuchen). Moegliche Ursachen: Portal/Netzwerk "
+            "dauerhaft nicht erreichbar oder Portal-Struktur geaendert."
+        )
+    if unbekannt:
+        absaetze.append(
+            f"{len(unbekannt)} unbekannte(r) Wert(e) gefunden, auf die das Programm noch "
+            "nicht vorbereitet ist."
+        )
+    zusammenfassung = "\n".join(absaetze) + "\n\n" + "\n".join(zeilen)
 
     return (
         zusammenfassung
@@ -58,8 +80,11 @@ def _formatiere_claude_prompt(anomalien: list[dict]) -> str:
 
     return (
         f"Im Projekt {ROOT_DIR} (lokale DFBnet-Spielplus-Automatisierung, Windows) ist beim "
-        "taeglichen automatisierten Lauf von src/run.py ein Problem aufgetreten, auf das der "
-        "Scraper noch nicht vorbereitet ist. Bitte Ursache analysieren, mir die noetige "
+        "taeglichen automatisierten Lauf von src/run.py ein Problem aufgetreten. Technische "
+        "Fehler (scraping_fehler) wurden bereits mehrfach automatisch wiederholt (siehe "
+        "logs/run.log); pruefe zuerst, ob es sich um ein voruebergehendes Netzwerk-/Portal-"
+        "Problem oder eine geaenderte Portal-Struktur handelt, indem du einen manuellen "
+        "Testlauf machst. Bitte Ursache analysieren, mir die noetige "
         "Codeaenderung erklaeren und nach meiner Bestaetigung umsetzen.\n\n"
         f"Anzahl Anomalien: {len(anomalien)}\n\n"
         + "\n\n".join(bloecke)
@@ -88,7 +113,7 @@ def sende_email_anomalien(anomalien: list[dict]) -> None:
         return
 
     nachricht = MIMEText(_formatiere_email_text(anomalien), "plain", "utf-8")
-    nachricht["Subject"] = f"DFBnet Spielplus: {len(anomalien)} unbekannte(r) Wert(e) erkannt"
+    nachricht["Subject"] = _titel(anomalien)
     nachricht["From"] = SMTP_USER
     nachricht["To"] = NOTIFY_EMAIL_TO
 

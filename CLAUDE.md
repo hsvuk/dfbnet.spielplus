@@ -75,6 +75,23 @@ Anomalie-Check → Toast/E-Mail, headless, Duplikatsschutz.
   tab-getrennt (`platzbelegung.parse_csv`).
 - Täglicher Task Scheduler-Eintrag `DFBnet Spielplus taeglich` (17:00 Uhr) ist eingerichtet.
 
+## Robustheit im Dauerbetrieb (seit 29.10.2026)
+Im Betrieb traten sporadisch Timeouts auf (15.10., 23.10., 28.10.2026 — jeweils an anderer Stelle:
+CSV-Download, `#username`, Redirect nach Login; am 15.10. zusätzlich `getaddrinfo failed`, also
+kein Netzwerk/DNS). Ursache war kein Strukturwechsel des Portals, sondern langsames Portal bzw.
+Rechner/Netzwerk nicht bereit. Gegenmaßnahmen:
+- `run.py`: bis zu 3 Versuche (Pausen 60 s / 180 s), vor jedem Versuch Wartezeit auf DNS/Netzwerk
+  (max. 5 min). Anomalie + Toast + E-Mail erst, wenn alle Versuche scheitern.
+- Timeouts auf 60 s erhöht (`login.py`: `LOGIN_TIMEOUT_MS`, `run.py`: `PAGE_TIMEOUT_MS`);
+  Login wartet gezielt auf `#username` statt auf `networkidle`.
+- `notify.py`: Betreff/Text unterscheiden „technische Fehler“ (`scraping_fehler`) von
+  „unbekannte Werte“ (`unbekannter_status`).
+- Task Scheduler: `StartWhenAvailable` und `RunOnlyIfNetworkAvailable` aktiviert (verpasste Läufe
+  werden nachgeholt, Start nur mit Netzwerk). `DisallowStartIfOnBatteries` ist weiterhin an
+  (Akkubetrieb überspringt den Lauf).
+- Diagnose bei Fehlern immer zuerst `logs/run.log` prüfen und manuellen Testlauf machen
+  (`venv\Scripts\python.exe src\run.py`), bevor Selektoren geändert werden.
+
 ## Wichtige Entscheidungen & Begründungen
 - **Playwright statt HTTP-Requests**: DFBnet Spielplus nutzt OAuth-Login (`auth.dfbnet.org`,
   Keycloak) + Angular-Frontend; ein reiner Request-Login ist damit nicht robust nachbaubar.

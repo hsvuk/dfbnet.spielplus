@@ -17,9 +17,12 @@ ANMELDEN_LINK_XPATH = (
 )
 
 
+LOGIN_TIMEOUT_MS = 60_000  # Portal/Auth-Server sind zeitweise langsam (Timeouts im Betrieb)
+
+
 def login(page: Page) -> None:
-    page.goto(LOGIN_URL)
-    page.wait_for_load_state("networkidle")
+    page.goto(LOGIN_URL, timeout=LOGIN_TIMEOUT_MS)
+    page.wait_for_load_state("networkidle", timeout=LOGIN_TIMEOUT_MS)
 
     decline = page.get_by_text(COOKIE_DECLINE_TEXT, exact=True)
     if decline.count() > 0:
@@ -27,17 +30,19 @@ def login(page: Page) -> None:
         page.wait_for_timeout(300)
 
     page.locator(ANMELDEN_LINK_XPATH).first.click(force=True)
-    page.wait_for_load_state("networkidle")
 
-    page.locator("#username").fill(USERNAME)
-    page.locator("#password").fill(PASSWORD)
+    # Gezielt auf das Keycloak-Formular warten statt auf "networkidle"
+    username = page.locator("#username")
+    username.wait_for(state="visible", timeout=LOGIN_TIMEOUT_MS)
+    username.fill(USERNAME, timeout=LOGIN_TIMEOUT_MS)
+    page.locator("#password").fill(PASSWORD, timeout=LOGIN_TIMEOUT_MS)
     page.locator("#password").press("Enter")
 
     # Die Portalseite laedt fortlaufend Werbebanner nach, daher wird hier nicht auf
     # "networkidle" gewartet (das koennte nie eintreten), sondern nur auf die Rueckkehr
     # zu www.dfbnet.org sowie den anschliessenden DOM-Ladezustand.
-    page.wait_for_url("**://www.dfbnet.org/**", timeout=15000)
-    page.wait_for_load_state("domcontentloaded")
+    page.wait_for_url("**://www.dfbnet.org/**", timeout=LOGIN_TIMEOUT_MS)
+    page.wait_for_load_state("domcontentloaded", timeout=LOGIN_TIMEOUT_MS)
 
 
 if __name__ == "__main__":
