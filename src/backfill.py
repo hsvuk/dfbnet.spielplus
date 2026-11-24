@@ -9,28 +9,17 @@ Aufruf: venv\\Scripts\\python.exe src\\backfill.py 01.07.2024 [ende_dd.mm.yyyy]
 import sys
 import tempfile
 import traceback
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 from db import connect, init_db, record_anomalie
-from ergebnisse import export_csv, goto_and_search, scrape_ergebnisse, unbekannte_stati
+from ergebnisse import export_csv, goto_and_search, scrape_ergebnisse, unbekannte_stati, zeitfenster
 from login import login
 from notify import benachrichtige_anomalien, sende_email_anomalien
 from platzbelegung import parse_csv
 from verarbeitung import speichere
-
-FENSTER_TAGE = 90
-
-
-def zeitfenster(start: date, ende: date, schritt_tage: int = FENSTER_TAGE):
-    aktuell = start
-    while aktuell <= ende:
-        fenster_ende = min(aktuell + timedelta(days=schritt_tage - 1), ende)
-        yield aktuell, fenster_ende
-        aktuell = fenster_ende + timedelta(days=1)
-
 
 def run_backfill(start: date, ende: date, headless: bool = False) -> None:
     init_db()

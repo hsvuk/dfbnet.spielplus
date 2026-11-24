@@ -7,7 +7,7 @@ Ablauf (verifiziert per sichtbarem Testlauf):
 4. Redirect zurueck zu www.dfbnet.org bestaetigt erfolgreichen Login.
 """
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from config import LOGIN_URL, PASSWORD, USERNAME
 
@@ -41,7 +41,17 @@ def login(page: Page) -> None:
     # Die Portalseite laedt fortlaufend Werbebanner nach, daher wird hier nicht auf
     # "networkidle" gewartet (das koennte nie eintreten), sondern nur auf die Rueckkehr
     # zu www.dfbnet.org sowie den anschliessenden DOM-Ladezustand.
-    page.wait_for_url("**://www.dfbnet.org/**", timeout=LOGIN_TIMEOUT_MS, wait_until="domcontentloaded")
+    try:
+        page.wait_for_url("**://www.dfbnet.org/**", timeout=LOGIN_TIMEOUT_MS, wait_until="domcontentloaded")
+    except PlaywrightTimeoutError:
+        # Keycloak verlangt gelegentlich eine Aktion (z. B. Passwortaenderung, Nutzungsbedingungen)
+        if "required-action" in page.url:
+            raise RuntimeError(
+                "DFBnet verlangt eine Aktion vor dem Login (Keycloak 'required-action', "
+                f"URL: {page.url.split('&')[0]}). Beim Passwortablauf: im Browser einloggen, "
+                "neues Passwort vergeben und DFBNET_PASSWORD in .env anpassen."
+            ) from None
+        raise
     page.wait_for_load_state("domcontentloaded", timeout=LOGIN_TIMEOUT_MS)
 
 

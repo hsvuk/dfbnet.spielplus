@@ -77,7 +77,20 @@ Anomalie-Check → Toast/E-Mail, headless, Duplikatsschutz.
 - Platzbelegung UND Spielstätte pro Spiel kommen aus dem CSV-Export (Button "Export" auf
   derselben Seite), nicht aus einem separaten "Spielstätten"-Menü. CSV ist UTF-16-kodiert,
   tab-getrennt (`platzbelegung.parse_csv`).
+- Login-Sonderfall: Verlangt DFBnet eine Passwortänderung (Keycloak `required-action=UPDATE_PASSWORD`,
+  trat am 12.11.2026 auf), scheitert der Login mit Timeout; `login.py` meldet das jetzt klar.
+  Abhilfe: im Browser neues Passwort setzen und `DFBNET_PASSWORD` in `.env` anpassen.
 - Täglicher Task Scheduler-Eintrag `DFBnet Spielplus taeglich` (17:00 Uhr) ist eingerichtet.
+
+## Lesezeitraum (seit 14.11.2026)
+Der tägliche Lauf liest von **heute − 30 Tage bis zum nächsten 30.6.** (Saisonende; ist heute
+nach dem 30.6., dann der 30.6. des Folgejahres), `ergebnisse.taegliches_fenster()`. Das Portal
+erlaubt je Abfrage nur 3 Monate, deshalb wird der Zeitraum mit `ergebnisse.zeitfenster()` in
+Abschnitte von höchstens 90 Tagen zerlegt (je Abschnitt: suchen, scrapen, CSV-Export); `run.py`
+sammelt alle Abschnitte und ruft `speichere()` einmal für den ganzen Zeitraum auf. Dadurch sehen
+Verlegungs-Logik und Platzbelegungs-Bereinigung beide Zeilen eines verlegten Spiels gemeinsam.
+Ein Lauf braucht dafür bis zu ~5 Abschnitte (ca. 1,5 Minuten). `backfill.py` nutzt dieselbe
+`zeitfenster()`-Funktion.
 
 ## Spielnummern & Verlegungen (seit 29.10.2026)
 Erkenntnisse aus echten Portaldaten — NICHT wieder „vereinfachen“:

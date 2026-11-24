@@ -43,14 +43,30 @@ def _format(d: date) -> str:
     return d.strftime("%d.%m.%Y")
 
 
-def rolling_window(today: date | None = None) -> tuple[date, date]:
-    """Rollierendes ~3-Monats-Fenster: 1 Monat zurueck bis 2 Monate voraus."""
+FENSTER_TAGE = 90  # Das Portal erlaubt je Abfrage nur 3 Monate
+
+
+def taegliches_fenster(today: date | None = None) -> tuple[date, date]:
+    """Lesezeitraum des taeglichen Laufs: 30 Tage zurueck bis zum naechsten 30.6. (Saisonende).
+    Ist heute der 30.6. oder frueher im Jahr, ist es der 30.6. des laufenden Jahres."""
     today = today or date.today()
-    return today - timedelta(days=30), today + timedelta(days=60)
+    saisonende = date(today.year, 6, 30)
+    if today > saisonende:
+        saisonende = date(today.year + 1, 6, 30)
+    return today - timedelta(days=30), saisonende
+
+
+def zeitfenster(start: date, ende: date, schritt_tage: int = FENSTER_TAGE):
+    """Zerlegt [start, ende] in aufeinanderfolgende Abschnitte von hoechstens schritt_tage Tagen."""
+    aktuell = start
+    while aktuell <= ende:
+        fenster_ende = min(aktuell + timedelta(days=schritt_tage - 1), ende)
+        yield aktuell, fenster_ende
+        aktuell = fenster_ende + timedelta(days=1)
 
 
 def goto_and_search(page: Page, von: date | None = None, bis: date | None = None) -> None:
-    von_date, bis_date = rolling_window() if von is None or bis is None else (von, bis)
+    von_date, bis_date = taegliches_fenster() if von is None or bis is None else (von, bis)
 
     page.locator(MENU_BUTTON_SELECTOR).click()
     page.wait_for_timeout(500)

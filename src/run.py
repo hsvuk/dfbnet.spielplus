@@ -12,9 +12,10 @@ from db import connect, init_db, record_anomalie
 from ergebnisse import (
     export_csv,
     goto_and_search,
-    rolling_window,
     scrape_ergebnisse,
+    taegliches_fenster,
     unbekannte_stati,
+    zeitfenster,
 )
 from login import login
 from notify import benachrichtige_anomalien, sende_email_anomalien
@@ -67,17 +68,18 @@ def _hole_daten(headless: bool) -> tuple[list[dict], list[dict]]:
             log.info("Login...")
             login(page)
 
-            log.info("Vereinsspielplan suchen...")
-            goto_and_search(page)
+            von, bis = taegliches_fenster()
+            spiele: list[dict] = []
+            csv_rows: list[dict] = []
+            for fenster_von, fenster_bis in zeitfenster(von, bis):
+                log.info("Fenster %s - %s ...", fenster_von.strftime("%d.%m.%Y"), fenster_bis.strftime("%d.%m.%Y"))
+                goto_and_search(page, fenster_von, fenster_bis)
+                spiele.extend(scrape_ergebnisse(page))
 
-            log.info("Ergebnisse auslesen...")
-            spiele = scrape_ergebnisse(page)
-
-            log.info("CSV-Export fuer Spielstaetten/Platzbelegung...")
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                csv_path = Path(tmp_dir) / "spielplan.csv"
-                export_csv(page, csv_path)
-                csv_rows = parse_csv(csv_path)
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    csv_path = Path(tmp_dir) / "spielplan.csv"
+                    export_csv(page, csv_path)
+                    csv_rows.extend(parse_csv(csv_path))
         finally:
             browser.close()
     return spiele, csv_rows
@@ -119,7 +121,7 @@ def main(headless: bool = True) -> int:
             sende_email_anomalien(fehler)
             return 1
 
-    von, bis = rolling_window()
+    von, bis = taegliches_fenster()
     anomalien = unbekannte_stati(spiele)
     with connect() as conn:
         aktuelle_spiele, belegungen, fehler = speichere(conn, spiele, csv_rows, von, bis)
